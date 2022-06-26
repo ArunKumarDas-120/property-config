@@ -25,7 +25,7 @@
             type: properties
           -
             from: DataBase
-            query: select * from app_prop
+            query: select * from Table_name
             keyColumn: key
             valueColumn: prop_value
    </pre>

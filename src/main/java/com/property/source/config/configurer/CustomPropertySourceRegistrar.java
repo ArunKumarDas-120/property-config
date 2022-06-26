@@ -24,19 +24,14 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.type.AnnotationMetadata;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.Properties;
+import java.io.IOException;
+import java.util.*;
 
 
 public class CustomPropertySourceRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, BeanFactoryAware {
 
     private Environment environment;
     private BeanFactory beanFactory;
-    private final YamlPropertiesFactoryBean yamlPropertiesFactoryBean = new YamlPropertiesFactoryBean();
-    private final PropertiesFactoryBean propertiesFactoryBean = new PropertiesFactoryBean();
-    private final DataBasePropertiesFactoryBean dataBasePropertiesFactoryBean = new DataBasePropertiesFactoryBean();
 
     @Override
     public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
@@ -51,22 +46,13 @@ public class CustomPropertySourceRegistrar implements ImportBeanDefinitionRegist
                 dbProp.put("user", x.getProperty("username"));
             });
             try {
-                List<Resource> propList = new ArrayList<>();
-                List<Resource> ymlPropList = new ArrayList<>();
-                List<Resource> dbList = new ArrayList<>();
-
+                List<Resource> proppertyResorceList = new ArrayList<>();
                 result.get().getConfig().forEach(s -> {
-                    this.addPropertyResources(s, propList, ymlPropList, dbList, dbProp);
+                    this.addPropertyResources(s, proppertyResorceList, dbProp);
                 });
-
-                propertiesFactoryBean.setLocations(propList.toArray(new Resource[]{}));
-                propertiesFactoryBean.afterPropertiesSet();
-                yamlPropertiesFactoryBean.setResources(ymlPropList.toArray(new Resource[]{}));
-                dataBasePropertiesFactoryBean.setLocations(dbList.toArray(new Resource[]{}));
+                PropertiesFactory propertiesFactory = new PropertiesFactory(proppertyResorceList);
                 Properties props = new Properties();
-                props.putAll(yamlPropertiesFactoryBean.getObject());
-                props.putAll(propertiesFactoryBean.getObject());
-                props.putAll(dataBasePropertiesFactoryBean.getObject());
+                propertiesFactory.populateProperties(props);
                 registry.registerBeanDefinition("customPropertySource", BeanDefinitionBuilder.
                         genericBeanDefinition(CustomPropertySource.class, () -> {
                             CustomPropertySource customPropertySource = new CustomPropertySource();
@@ -103,9 +89,7 @@ public class CustomPropertySourceRegistrar implements ImportBeanDefinitionRegist
     }
 
     private void addPropertyResources(PropertySourceConfig.PropertySource propertySource,
-                                      List<Resource> propList,
-                                      List<Resource> ymlPropList
-            , List<Resource> dbList, Properties dbProp) {
+                                      List<Resource> proppertyResorceList, Properties dbProp) {
         Resource resource = null;
         if (propertySource.getFrom().equalsIgnoreCase("Classpath"))
             resource = new ClassPathResource(propertySource.getName().concat(".").concat(propertySource.getType()));
@@ -115,15 +99,36 @@ public class CustomPropertySourceRegistrar implements ImportBeanDefinitionRegist
             resource = new DataBaseResource(propertySource.getQuery(), propertySource.getKeyColumn(),
                     propertySource.getValueColumn(), propertySource.getType(), dbProp);
         Optional.ofNullable(resource).ifPresent(r -> {
-            if (propertySource.getFrom().equalsIgnoreCase("Classpath")
-                    || propertySource.getFrom().equalsIgnoreCase("File")) {
-                if (propertySource.getType().equalsIgnoreCase("properties"))
-                    propList.add(r);
-                else if (propertySource.getType().equalsIgnoreCase("yml"))
-                    ymlPropList.add(r);
-            } else if (propertySource.getFrom().equalsIgnoreCase("DataBase")) {
-                dbList.add(r);
-            }
+            proppertyResorceList.add(r);
         });
+    }
+
+    private class PropertiesFactory{
+        final YamlPropertiesFactoryBean yamlPropertiesFactoryBean = new YamlPropertiesFactoryBean();
+        final PropertiesFactoryBean propertiesFactoryBean = new PropertiesFactoryBean();
+        final DataBasePropertiesFactoryBean dataBasePropertiesFactoryBean = new DataBasePropertiesFactoryBean();
+        final List<Resource> propertySources = new ArrayList<>();
+        PropertiesFactory(List<Resource> ...resourceList){
+            Arrays.stream(resourceList).forEach(x-> propertySources.addAll(x));
+        }
+
+        private void populateProperties(Properties properties) throws Exception {
+            for (Resource x : propertySources){
+                if(x instanceof ClassPathResource || x instanceof FileSystemResource){
+                    String name = x.getFilename();
+                    if(name.endsWith(".properties")){
+                        propertiesFactoryBean.setLocation(x);
+                        propertiesFactoryBean.afterPropertiesSet();
+                        properties.putAll(propertiesFactoryBean.getObject());
+                    }else if(name.endsWith(".yml") || name.endsWith("YML")){
+                        yamlPropertiesFactoryBean.setResources(x);
+                        properties.putAll(yamlPropertiesFactoryBean.getObject());
+                    }
+                }else if(x instanceof DataBaseResource){
+                    dataBasePropertiesFactoryBean.setLocations(x);
+                    properties.putAll(dataBasePropertiesFactoryBean.getObject());
+                }
+            }
+        }
     }
 }
